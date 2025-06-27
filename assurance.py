@@ -80,7 +80,7 @@ Tu dois générer le contenu sous la forme d'un json et uniquement un json. Ton 
 
     def convertir_llm_output_en_dataframe(self, llm_output: str) -> Optional[pd.DataFrame]:
         """
-        Nettoie la sortie brute d'un LLM pour en extraire un JSON et le convertit en DataFrame Pandas.
+        Nettoie la sortie brute d'un LLM pour en extraire un JSON et le convertit en DataFrame Pandas
 
         Cette fonction est conçue pour être robuste face à du texte ou des balises
         markdown (comme ```json) qui peuvent entourer le contenu JSON réel.
