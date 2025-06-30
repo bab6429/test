@@ -32,20 +32,6 @@ class AmortizationExtractor:
             raise ValueError("La clé API GOOGLE_GENAI_API_KEY n'est pas définie dans les secrets Streamlit ou le fichier .env")
         
         self.client = genai.Client(api_key=api_key)
-    
-    def _get_api_key(self) -> Optional[str]:
-        """Récupère la clé API depuis les secrets Streamlit ou le fichier .env"""
-        # Priorité aux secrets Streamlit si disponibles
-        if STREAMLIT_AVAILABLE:
-            try:
-                return st.secrets.get("GOOGLE_GENAI_API_KEY")
-            except (AttributeError, FileNotFoundError, KeyError):
-                pass
-        
-        # Fallback vers le fichier .env
-        return os.getenv('GOOGLE_GENAI_API_KEY')
-        
-        self.client = genai.Client(api_key=api_key)
         self.prompt = '''Peux tu m extraires de ce fichier le tableau d amortissement et générer un le résultat sous la forme d un json comme ceci :
 [
     {
@@ -59,6 +45,18 @@ class AmortizationExtractor:
 
 Tu dois générer le contenu sous la forme d'un json et uniquement un json. Ton json doit etre complet et tu ne dois oublier aucune ligne de ce tableau d'amortissement. Ton output devra etre une base pour que je puisse ensuite créer un csv à partir de ce json donc il faut qu'il soit complet
 '''
+    
+    def _get_api_key(self) -> Optional[str]:
+        """Récupère la clé API depuis les secrets Streamlit ou le fichier .env"""
+        # Priorité aux secrets Streamlit si disponibles
+        if STREAMLIT_AVAILABLE:
+            try:
+                return st.secrets.get("GOOGLE_GENAI_API_KEY")
+            except (AttributeError, FileNotFoundError, KeyError):
+                pass
+        
+        # Fallback vers le fichier .env
+        return os.getenv('GOOGLE_GENAI_API_KEY')
 
     def extract_from_pdf(self, pdf_path: str) -> str:
         """
