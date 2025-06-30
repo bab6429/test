@@ -12,6 +12,12 @@ from google.genai import types
 from dotenv import load_dotenv
 from typing import Optional
 
+try:
+    import streamlit as st
+    STREAMLIT_AVAILABLE = True
+except ImportError:
+    STREAMLIT_AVAILABLE = False
+
 # Charger les variables d'environnement
 load_dotenv()
 
@@ -20,10 +26,24 @@ class AmortizationExtractor:
     """Classe pour extraire et traiter les tableaux d'amortissement depuis des fichiers PDF"""
     
     def __init__(self):
-        """Initialise le client Gemini avec la clé API depuis le fichier .env"""
-        api_key = os.getenv('GOOGLE_GENAI_API_KEY')
+        """Initialise le client Gemini avec la clé API depuis les secrets Streamlit ou le fichier .env"""
+        api_key = self._get_api_key()
         if not api_key:
-            raise ValueError("La clé API GOOGLE_GENAI_API_KEY n'est pas définie dans le fichier .env")
+            raise ValueError("La clé API GOOGLE_GENAI_API_KEY n'est pas définie dans les secrets Streamlit ou le fichier .env")
+        
+        self.client = genai.Client(api_key=api_key)
+    
+    def _get_api_key(self) -> Optional[str]:
+        """Récupère la clé API depuis les secrets Streamlit ou le fichier .env"""
+        # Priorité aux secrets Streamlit si disponibles
+        if STREAMLIT_AVAILABLE:
+            try:
+                return st.secrets.get("GOOGLE_GENAI_API_KEY")
+            except (AttributeError, FileNotFoundError, KeyError):
+                pass
+        
+        # Fallback vers le fichier .env
+        return os.getenv('GOOGLE_GENAI_API_KEY')
         
         self.client = genai.Client(api_key=api_key)
         self.prompt = '''Peux tu m extraires de ce fichier le tableau d amortissement et générer un le résultat sous la forme d un json comme ceci :

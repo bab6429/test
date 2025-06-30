@@ -24,13 +24,38 @@ en utilisant l'API Google Gemini et de les convertir en format structuré (DataF
 # Sidebar pour la configuration
 st.sidebar.header("⚙️ Configuration")
 
-# Vérification du fichier .env
-env_file_exists = os.path.exists('.env')
-if env_file_exists:
-    st.sidebar.success("✅ Fichier .env détecté")
+# Vérification de la disponibilité de la clé API
+def check_api_key_availability():
+    """Vérifie si la clé API est disponible dans les secrets ou le fichier .env"""
+    # Vérifier les secrets Streamlit
+    try:
+        api_key_from_secrets = st.secrets.get("GOOGLE_GENAI_API_KEY")
+        if api_key_from_secrets:
+            return True, "secrets"
+    except (AttributeError, FileNotFoundError, KeyError):
+        pass
+    
+    # Vérifier le fichier .env
+    env_file_exists = os.path.exists('.env')
+    if env_file_exists:
+        from dotenv import load_dotenv
+        load_dotenv()
+        api_key_from_env = os.getenv('GOOGLE_GENAI_API_KEY')
+        if api_key_from_env:
+            return True, "env"
+    
+    return False, None
+
+api_available, source = check_api_key_availability()
+
+if api_available:
+    if source == "secrets":
+        st.sidebar.success("✅ Clé API configurée (Secrets Streamlit)")
+    else:
+        st.sidebar.success("✅ Clé API configurée (Fichier .env)")
 else:
-    st.sidebar.error("❌ Fichier .env non trouvé")
-    st.sidebar.markdown("Créez un fichier `.env` avec votre clé API Google Gemini")
+    st.sidebar.error("❌ Clé API non trouvée")
+    st.sidebar.markdown("Configurez la clé API dans les secrets Streamlit ou créez un fichier `.env`")
 
 # Interface principale
 col1, col2 = st.columns([1, 1])
@@ -50,8 +75,8 @@ with col1:
         
         # Bouton pour lancer l'extraction
         if st.button("🚀 Extraire le tableau d'amortissement", type="primary"):
-            if not env_file_exists:
-                st.error("❌ Impossible de continuer sans le fichier .env")
+            if not api_available:
+                st.error("❌ Impossible de continuer sans la clé API configurée")
             else:
                 # Sauvegarde temporaire du fichier
                 temp_path = f"temp_{uploaded_file.name}"
@@ -176,11 +201,18 @@ st.header("❓ Aide")
 
 with st.expander("🔧 Configuration requise"):
     st.markdown("""
-    **Fichiers nécessaires :**
-    - `.env` : Contient votre clé API Google Gemini
-    - `requirements.txt` : Liste des dépendances Python
+    **Configuration de la clé API :**
     
-    **Contenu du fichier .env :**
+    **Option 1 - Streamlit Cloud (Recommandé) :**
+    1. Allez dans les paramètres de votre app sur Streamlit Cloud
+    2. Section "Secrets"
+    3. Ajoutez votre clé API :
+    ```toml
+    GOOGLE_GENAI_API_KEY = "votre_cle_api_ici"
+    ```
+    
+    **Option 2 - Développement local :**
+    - Créez un fichier `.env` avec :
     ```
     GOOGLE_GENAI_API_KEY=votre_cle_api_ici
     ```
@@ -189,6 +221,26 @@ with st.expander("🔧 Configuration requise"):
     ```bash
     pip install -r requirements.txt
     ```
+    """)
+
+with st.expander("🔐 Configuration des secrets Streamlit Cloud"):
+    st.markdown("""
+    **Étapes pour configurer les secrets sur Streamlit Cloud :**
+    
+    1. **Accédez à votre app** sur [share.streamlit.io](https://share.streamlit.io)
+    2. **Cliquez sur les 3 points** à droite de votre app
+    3. **Sélectionnez "Settings"**
+    4. **Allez dans l'onglet "Secrets"**
+    5. **Ajoutez votre configuration** au format TOML :
+    
+    ```toml
+    GOOGLE_GENAI_API_KEY = "AIza..."
+    ```
+    
+    6. **Cliquez sur "Save"**
+    7. **Votre app va redémarrer** automatiquement
+    
+    ⚠️ **Important :** Les secrets sont chiffrés et sécurisés sur Streamlit Cloud.
     """)
 
 with st.expander("📄 Format de fichier supporté"):
@@ -206,10 +258,14 @@ with st.expander("📄 Format de fichier supporté"):
 with st.expander("🚀 Utilisation"):
     st.markdown("""
     **Étapes :**
-    1. Configurez votre fichier `.env` avec la clé API Google Gemini
-    2. Uploadez votre fichier PDF contenant le tableau d'amortissement
-    3. Cliquez sur "Extraire le tableau d'amortissement"
-    4. Consultez les résultats et exportez en CSV ou Excel
+    1. **Configurez votre clé API** :
+       - Sur Streamlit Cloud : Utilisez les secrets (voir section dédiée)
+       - En local : Créez un fichier `.env` avec votre clé API Google Gemini
+    2. **Uploadez votre fichier PDF** contenant le tableau d'amortissement
+    3. **Cliquez sur "Extraire le tableau d'amortissement"**
+    4. **Consultez les résultats** et exportez en CSV ou Excel
+    
+    **Note :** L'application détecte automatiquement si vous utilisez Streamlit Cloud ou un environnement local.
     """)
 
 # Footer
