@@ -94,7 +94,7 @@ class LangfuseProcessor:
         # Payload avec fichier en base64
         payload = {
             "structured_output": False,
-            "streaming": True,
+            "streaming": False,
             "prompt_name": self.prompt_name,
             "langfuse_public_key": self.langfuse_public_key,
             "prompt_version": self.prompt_version,
