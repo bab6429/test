@@ -1,269 +1,114 @@
-# -*- coding: utf-8 -*-
-"""
-Module d'extraction et traitement de tableaux d'amortissement à partir de fichiers PDF
-Utilise l'API Google Gemini pour extraire les données et les convertir en DataFrame
-"""
+# assurance.py
 
-import os
+import requests
+import re
 import json
-import pandas as pd
-from google import genai
-from google.genai import types
-from dotenv import load_dotenv
-from typing import Optional
+import base64
 
-try:
-    import streamlit as st
-    STREAMLIT_AVAILABLE = True
-except ImportError:
-    STREAMLIT_AVAILABLE = False
-
-# Charger les variables d'environnement
-load_dotenv()
-
-
-class AmortizationExtractor:
-    """Classe pour extraire et traiter les tableaux d'amortissement depuis des fichiers PDF"""
-    
-    def __init__(self):
-        """Initialise le client Gemini avec la clé API depuis les secrets Streamlit ou le fichier .env"""
-        api_key = self._get_api_key()
-        if not api_key:
-            raise ValueError("La clé API GOOGLE_GENAI_API_KEY n'est pas définie dans les secrets Streamlit ou le fichier .env")
-        
-        self.client = genai.Client(api_key=api_key)
-        self.prompt = '''Peux tu m extraires de ce fichier le tableau d amortissement et générer un le résultat sous la forme d un json comme ceci :
-[
-    {
-        "Date d'écheance" : "JJ/MM/AAAA",
-        "amortissements" : "xx",
-        "Interet" : "xx",
-        "Assurances" : "xx",
-        "capital restant du" : "xx",
-    }
-]
-
-Tu dois générer le contenu sous la forme d'un json et uniquement un json. Ton json doit etre complet et tu ne dois oublier aucune ligne de ce tableau d'amortissement. Ton output devra etre une base pour que je puisse ensuite créer un csv à partir de ce json donc il faut qu'il soit complet
-'''
-    
-    def _get_api_key(self) -> Optional[str]:
-        """Récupère la clé API depuis les secrets Streamlit ou le fichier .env"""
-        # Priorité aux secrets Streamlit si disponibles
-        if STREAMLIT_AVAILABLE:
-            try:
-                return st.secrets.get("GOOGLE_GENAI_API_KEY")
-            except (AttributeError, FileNotFoundError, KeyError):
-                pass
-        
-        # Fallback vers le fichier .env
-        return os.getenv('GOOGLE_GENAI_API_KEY')
-
-    def extract_from_pdf(self, pdf_path: str) -> str:
+class LangfuseProcessor:
+    """
+    Une classe pour encapsuler la logique d'envoi de PDF à l'API Langfuse.
+    """
+    def __init__(self, auth_token: str, api_url: str, prompt_name: str, 
+                 langfuse_public_key: str, prompt_version: str):
         """
-        Extrait le tableau d'amortissement d'un fichier PDF
-        
-        Args:
-            pdf_path: Chemin vers le fichier PDF
-            
-        Returns:
-            Réponse brute de l'API Gemini
-            
-        Raises:
-            FileNotFoundError: Si le fichier PDF n'existe pas
-            Exception: Pour les autres erreurs d'extraction
+        Initialise le processeur avec la configuration nécessaire.
         """
-        if not os.path.exists(pdf_path):
-            raise FileNotFoundError(f"Le fichier '{pdf_path}' n'a pas été trouvé.")
-        
-        try:
-            # Lecture du fichier PDF
-            with open(pdf_path, 'rb') as f:
-                doc_data = f.read()
-
-            # Appel à l'API Gemini
-            response = self.client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=[
-                    types.Part.from_bytes(
-                        data=doc_data,
-                        mime_type='application/pdf',
-                    ),
-                    self.prompt
-                ])
+        if not all([auth_token, api_url, prompt_name, langfuse_public_key, prompt_version]):
+            raise ValueError("Tous les paramètres de configuration doivent être fournis.")
             
-            return response.text
-            
-        except Exception as e:
-            raise Exception(f"Erreur lors de l'extraction du PDF: {str(e)}")
+        self.auth_token = auth_token
+        self.api_url = api_url
+        self.prompt_name = prompt_name
+        self.langfuse_public_key = langfuse_public_key
+        self.prompt_version = prompt_version
 
-    def convertir_llm_output_en_dataframe(self, llm_output: str) -> Optional[pd.DataFrame]:
+    def _process_langfuse_response(self, response: requests.Response):
         """
-        Nettoie la sortie brute d'un LLM pour en extraire un JSON et le convertit en DataFrame Pandas
-
-        Cette fonction est conçue pour être robuste face à du texte ou des balises
-        markdown (comme ```json) qui peuvent entourer le contenu JSON réel.
-
-        Args:
-            llm_output: La chaîne de caractères complète retournée par le LLM.
-
-        Returns:
-            Un DataFrame Pandas si la conversion réussit, sinon None.
-        """
-        print("--- Tentative de nettoyage et d'extraction du JSON ---")
-
-        try:
-            # 1. Isoler le JSON : trouver le premier '[' et le dernier ']'
-            # C'est une méthode simple et efficace pour ignorer le texte environnant.
-            debut_json = llm_output.find('[')
-            fin_json = llm_output.rfind(']') + 1
-
-            # Vérification si les délimiteurs JSON ont été trouvés
-            if debut_json == -1 or fin_json == 0:
-                print("ERREUR : Impossible de trouver le début ou la fin du JSON (caractères '[' et ']').")
-                return None
-
-            # Extraire la chaîne de caractères contenant uniquement le JSON
-            json_isole = llm_output[debut_json:fin_json]
-            print("JSON isolé avec succès.")
-
-            # 2. Charger le JSON en objet Python
-            # json.loads() transforme la chaîne de caractères en une liste de dictionnaires
-            donnees_python = json.loads(json_isole)
-
-            # 3. Créer le DataFrame avec Pandas
-            df = pd.DataFrame(donnees_python)
-
-            # 4. (Optionnel mais recommandé) Convertir les colonnes aux bons types
-            # S'assure que la colonne de date est bien un objet date et non du texte
-            if "Date d'echeance" in df.columns:
-                df["Date d'echeance"] = pd.to_datetime(df["Date d'echeance"], format='%d/%m/%Y')
-
-            print("Conversion en DataFrame Pandas réussie.")
-            return df
-
-        except json.JSONDecodeError:
-            print(f"ERREUR : La chaîne extraite n'est pas un JSON valide.\nContenu extrait : {json_isole}")
-            return None
-        except Exception as e:
-            print(f"Une erreur inattendue est survenue : {e}")
-            return None
-
-    def process_pdf_to_dataframe(self, pdf_path: str) -> Optional[pd.DataFrame]:
-        """
-        Traite un fichier PDF complet : extraction + conversion en DataFrame
-        
-        Args:
-            pdf_path: Chemin vers le fichier PDF
-            
-        Returns:
-            DataFrame contenant le tableau d'amortissement ou None en cas d'erreur
+        Traite la réponse de l'API et extrait le contenu généré par le LLM.
         """
         try:
-            # Extraction du contenu
-            llm_output = self.extract_from_pdf(pdf_path)
+            # Vérifier le statut de la réponse
+            response.raise_for_status()
             
-            # Conversion en DataFrame
-            df = self.convertir_llm_output_en_dataframe(llm_output)
+            # Parser la réponse JSON complète
+            response_data = response.json()
             
-            return df
-            
-        except Exception as e:
-            print(f"Erreur lors du traitement complet : {str(e)}")
-            return None
-
-    def calculer_statistiques(self, df: pd.DataFrame) -> dict:
-        """
-        Calcule les statistiques du tableau d'amortissement
-        
-        Args:
-            df: DataFrame contenant le tableau d'amortissement
-            
-        Returns:
-            Dictionnaire avec les statistiques calculées
-        """
-        stats = {}
-        
-        try:
-            # Total des assurances
-            if 'Assurances' in df.columns:
-                assurances_values = df['Assurances'].astype(str).str.replace(',', '.').str.replace(' ', '').str.replace('€', '')
-                assurances_numeric = pd.to_numeric(assurances_values, errors='coerce').fillna(0)
-                stats['total_assurances'] = assurances_numeric.sum()
+            # Extraire le contenu du LLM depuis le champ 'content'
+            if 'content' in response_data:
+                llm_output = response_data['content']
+                print(f"Contenu trouvé, longueur: {len(llm_output)}")
+                
+                # Le contenu contient ```json\n[...]\n```
+                # Extraire le JSON entre les balises markdown
+                json_match = re.search(r'```json\n(.*?)\n```', llm_output, re.DOTALL)
+                if json_match:
+                    json_str = json_match.group(1)
+                    try:
+                        json_content = json.loads(json_str)
+                        print("✅ JSON extrait avec succès depuis les balises markdown")
+                        return json_content
+                    except json.JSONDecodeError as e:
+                        print(f"⚠️ Erreur de parsing JSON: {e}")
+                        return {"raw_content": llm_output, "error": str(e)}
+                else:
+                    print("⚠️ Aucune balise JSON markdown trouvée, retour du contenu brut")
+                    return {"raw_content": llm_output}
             else:
-                stats['total_assurances'] = 0
-            
-            # Total des intérêts
-            if 'Interet' in df.columns:
-                interet_values = df['Interet'].astype(str).str.replace(',', '.').str.replace(' ', '').str.replace('€', '')
-                interet_numeric = pd.to_numeric(interet_values, errors='coerce').fillna(0)
-                stats['total_interets'] = interet_numeric.sum()
-            else:
-                stats['total_interets'] = 0
-            
-            # Première date d'échéance
-            date_columns = [col for col in df.columns if 'date' in col.lower() or 'echeance' in col.lower()]
-            if date_columns:
-                date_col = date_columns[0]
-                try:
-                    # Essayer de convertir en date
-                    dates = pd.to_datetime(df[date_col], format='%d/%m/%Y', errors='coerce')
-                    if not dates.isna().all():
-                        stats['premiere_echeance'] = dates.min().strftime('%d/%m/%Y')
-                    else:
-                        # Si la conversion échoue, prendre la première valeur
-                        stats['premiere_echeance'] = str(df[date_col].iloc[0])
-                except:
-                    stats['premiere_echeance'] = str(df[date_col].iloc[0])
-            else:
-                stats['premiere_echeance'] = "Non trouvé"
-            
-            # Nombre d'échéances
-            stats['nombre_echeances'] = len(df)
-            
-            return stats
-            
+                print("❌ Pas de champ 'content' trouvé dans la réponse")
+                available_fields = list(response_data.keys()) if isinstance(response_data, dict) else []
+                return {"error": "Pas de contenu trouvé", "available_fields": available_fields}
+                
+        except requests.exceptions.HTTPError as e:
+            print(f"❌ Erreur HTTP : {e}")
+            return {"error": f"HTTP Error: {e}", "status_code": response.status_code}
+        except json.JSONDecodeError as e:
+            print(f"❌ Erreur de décodage JSON : {e}")
+            return {"error": f"JSON Decode Error: {e}", "raw_response": response.text}
         except Exception as e:
-            print(f"Erreur lors du calcul des statistiques : {str(e)}")
-            return {
-                'total_assurances': 0,
-                'total_interets': 0,
-                'premiere_echeance': "Erreur",
-                'nombre_echeances': 0
-            }
-
-
-def main():
-    """Fonction principale pour tester le module"""
-    # Exemple d'utilisation
-    extractor = AmortizationExtractor()
-    
-    # Chemin vers votre fichier PDF (à adapter selon votre environnement)
-    pdf_path = "/content/2025 07_tableau-amortissement_Modulation 24 M (1).pdf"
-    
-    # Si vous êtes sur Windows, utilisez un chemin comme :
-    # pdf_path = r"C:\Users\votre_nom\Documents\votre_fichier.pdf"
-    
-    # Traitement du PDF
-    df = extractor.process_pdf_to_dataframe(pdf_path)
-    
-    if df is not None:
-        print("DataFrame créé avec succès :")
-        print(df.head())
+            print(f"❌ Erreur inattendue: {e}")
+            return {"error": f"Unexpected error: {e}"}
         
-        # Calcul des statistiques
-        stats = extractor.calculer_statistiques(df)
-        print("\nStatistiques :")
-        print(f"Total assurances : {stats['total_assurances']:.2f} €")
-        print(f"Total intérêts : {stats['total_interets']:.2f} €")
-        print(f"Première échéance : {stats['premiere_echeance']}")
-        print(f"Nombre d'échéances : {stats['nombre_echeances']}")
+
+    def _send_pdf_direct(self, doc_data: bytes, pdf_path: str) -> dict or str:
+        """
+        Envoie le PDF directement à Langfuse (encodé en base64)
         
-        # Optionnel : sauvegarde en CSV
-        df.to_csv("tableau_amortissement.csv", index=False)
-        print("Fichier CSV sauvegardé : tableau_amortissement.csv")
-    else:
-        print("Échec du traitement du PDF")
+        Args:
+            doc_data: Données binaires du PDF
+            pdf_path: Chemin du fichier (pour le nom)
+            
+        Returns:
+            Réponse de l'API Langfuse
+        """
+        # Encodage du PDF en base64
+        pdf_base64 = base64.b64encode(doc_data).decode('utf-8')
+        pdf_base64_uri = f"data:application/pdf;base64,{pdf_base64}"
+        
+        headers = {
+            "Authorization": f"Bearer {self.auth_token}",
+            "accept": "application/json",
+            "Content-Type": "application/json"
+        }
 
+        # Payload avec fichier en base64
+        payload = {
+            "structured_output": False,
+            "streaming": True,
+            "prompt_name": self.prompt_name,
+            "langfuse_public_key": self.langfuse_public_key,
+            "prompt_version": self.prompt_version,
+            "user_parameters": {},
+            "attachments": [pdf_base64_uri],
+        }
 
-if __name__ == "__main__":
-    main()
+        response = requests.post(self.api_url, headers=headers, json=payload)
+        return self._process_langfuse_response(response)
+
+    def analyze_pdf(self, pdf_bytes: bytes, pdf_name: str):
+        """
+        Méthode publique pour lancer l'analyse d'un PDF.
+        C'est cette méthode que l'interface Streamlit appellera.
+        """
+        print(f"Analyse du fichier '{pdf_name}'...")
+        return self._send_pdf_direct(doc_data=pdf_bytes, pdf_path=pdf_name)
